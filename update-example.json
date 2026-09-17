@@ -1,0 +1,7 @@
+{
+  "versionCode": 8,
+  "versionName": "1.7",
+  "apkUrl": "https://simple-alarm-updates.idkx66.chatgpt.site/SimpleAlarm-1.7.apk",
+  "sha256": "515058f96f4bd98e31b83277ecaef88c3c2e96dd84f5bfe9c3d6a466cb359849",
+  "notes": "深色圆角卡片与滚轮编辑页；保留主界面振动开关；增加铃声试听、恢复默认、音量调整和低音量提示；显示下次响铃日期；校验更新后提供安装通知与返回应用继续安装入口；修正备份保护和恢复后的编号分配。"
+}
