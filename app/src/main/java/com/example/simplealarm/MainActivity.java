@@ -55,11 +55,16 @@ public class MainActivity extends Activity {
         header.addView(title,new LinearLayout.LayoutParams(0,-2,1));header.addView(more,new LinearLayout.LayoutParams(dp(56),dp(56)));
         nextAlarm=new TextView(this);nextAlarm.setTextColor(0xFFFF676C);nextAlarm.setTextSize(15);nextAlarm.setPadding(dp(24),0,dp(24),dp(18));
         TextView tip=new TextView(this);tip.setText("点击时间编辑 · 长按删除");tip.setTextColor(0xFF919196);tip.setPadding(dp(24),0,0,dp(8));
+        LinearLayout quickActions=new LinearLayout(this);quickActions.setPadding(dp(20),0,dp(20),dp(12));
+        Button permissions=smallButton("权限检查"); Button backup=smallButton("备份与恢复");
+        quickActions.addView(permissions,new LinearLayout.LayoutParams(0,dp(48),1));
+        quickActions.addView(backup,new LinearLayout.LayoutParams(0,dp(48),1));
+        permissions.setOnClickListener(v->showPermissionStatus());backup.setOnClickListener(v->showBackupMenu());
         FrameLayout content=new FrameLayout(this);
         ScrollView scroll=new ScrollView(this);list=new LinearLayout(this);list.setOrientation(1);list.setPadding(dp(20),0,dp(20),dp(112));scroll.addView(list);content.addView(scroll);
         Button add=smallButton("＋");add.setTextSize(36);add.setTextColor(Color.WHITE);add.setBackground(rounded(0xFFEC4E58));add.setContentDescription("添加闹钟");
         FrameLayout.LayoutParams floating=new FrameLayout.LayoutParams(dp(72),dp(72),Gravity.BOTTOM|Gravity.CENTER_HORIZONTAL);floating.bottomMargin=dp(24);content.addView(add,floating);
-        root.addView(header);root.addView(nextAlarm);root.addView(tip);root.addView(content,new LinearLayout.LayoutParams(-1,0,1));setContentView(root);
+        root.addView(header);root.addView(nextAlarm);root.addView(quickActions);root.addView(tip);root.addView(content,new LinearLayout.LayoutParams(-1,0,1));setContentView(root);
         add.setOnClickListener(v->showEditor(null));
         more.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("闹钟设置").setItems(new String[]{"检查更新","权限检查","测试响铃","备份与恢复","闹钟音量"},(d,w)->{
             if(w==0)UpdateManager.check(this);else if(w==1)showPermissionStatus();else if(w==2)testAlarm();else if(w==3)showBackupMenu();else showVolume();
@@ -118,7 +123,17 @@ public class MainActivity extends Activity {
         EditText label = new EditText(this); label.setHint("闹钟名称"); label.setText(existing == null ? "闹钟" : existing.label); label.setSingleLine(true);
         TextView days = new TextView(this); days.setTextSize(16); days.setTextColor(0xFFFF676C); days.setPadding(dp(8),dp(16),dp(8),dp(16));
         final int[] mask = {existing == null ? 0 : existing.daysMask}; days.setText("重复：" + daysText(mask[0]));
-        days.setOnClickListener(v -> { final int[] draft={mask[0]}; boolean[] checked=new boolean[7]; for(int i=0;i<7;i++) checked[i]=(mask[0]&(1<<i))!=0; new AlertDialog.Builder(this).setTitle("选择重复日期").setMultiChoiceItems(new String[]{"周一","周二","周三","周四","周五","周六","周日"},checked,(d,which,on)->{if(on)draft[0]|=1<<which;else draft[0]&=~(1<<which);}).setPositiveButton("确定",(d,w)->{mask[0]=draft[0];days.setText("重复："+daysText(mask[0]));}).setNegativeButton("取消",null).show(); });
+        days.setOnClickListener(v -> {
+            final int[] draft={mask[0]}; boolean[] checked=new boolean[7];
+            for(int i=0;i<7;i++) checked[i]=(mask[0]&(1<<i))!=0;
+            String[] choices={"仅一次","工作日","每天","自选星期"};
+            new AlertDialog.Builder(this).setTitle("重复").setItems(choices,(d,which)->{
+                if(which==0){mask[0]=0;days.setText("重复："+daysText(mask[0]));}
+                else if(which==1){mask[0]=31;days.setText("重复："+daysText(mask[0]));}
+                else if(which==2){mask[0]=127;days.setText("重复："+daysText(mask[0]));}
+                else new AlertDialog.Builder(this).setTitle("选择重复日期").setMultiChoiceItems(new String[]{"周一","周二","周三","周四","周五","周六","周日"},checked,(dialog,day,on)->{if(on)draft[0]|=1<<day;else draft[0]&=~(1<<day);}).setPositiveButton("确定",(dialog,button)->{mask[0]=draft[0];days.setText("重复："+daysText(mask[0]));}).setNegativeButton("取消",null).show();
+            }).show();
+        });
         pendingRingtoneUri = existing == null ? "" : existing.ringtoneUri;
         pendingRingtoneLabel = new TextView(this); pendingRingtoneLabel.setText(pendingRingtoneUri.isEmpty() ? "铃声：系统默认（点击选择）" : "铃声：已选择自定义音频"); pendingRingtoneLabel.setTextColor(0xFFFF676C); pendingRingtoneLabel.setTextSize(16); pendingRingtoneLabel.setPadding(dp(8),dp(10),dp(8),dp(10));
         pendingRingtoneLabel.setOnClickListener(v -> chooseRingtone());
@@ -129,7 +144,7 @@ public class MainActivity extends Activity {
         Spinner snoozeMax = spinner(new String[]{"最多稍后 1 次","最多稍后 3 次","最多稍后 5 次"}, existing == null ? 1 : indexOf(new int[]{1,3,5}, existing.maxSnoozes));
         LinearLayout box=new LinearLayout(this);box.setOrientation(1);box.setPadding(dp(20),0,dp(20),dp(28));
         box.setBackgroundColor(Color.BLACK);box.addView(picker,new LinearLayout.LayoutParams(-1,dp(230)));
-        addGroup(box,"时间与重复",label,days);
+        addGroup(box,"名称与重复",label,days);
         Button listen=smallButton("试听 / 停止");listen.setOnClickListener(v->previewRingtone());
         Button reset=smallButton("恢复系统默认");reset.setOnClickListener(v->{stopPreview();pendingRingtoneUri="";pendingRingtoneLabel.setText("铃声：系统默认（点击选择）");});
         Button volume=smallButton("闹钟音量");volume.setOnClickListener(v->showVolume());

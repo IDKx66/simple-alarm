@@ -22,6 +22,7 @@ public class AlarmService extends Service {
     public static final String ACTION_STOP = "com.example.simplealarm.STOP";
     public static final String ACTION_SNOOZE = "com.example.simplealarm.SNOOZE";
     public static final String ACTION_VIBRATION = "com.example.simplealarm.VIBRATION";
+    public static final String EXTRA_ACTIVE_ALARM_IDS = "active_alarm_ids";
     private static boolean currentVibration;
     public static boolean isVibrationEnabled() { return currentVibration; }
     private Ringtone ringtone;
@@ -38,13 +39,17 @@ public class AlarmService extends Service {
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent == null) return START_NOT_STICKY;
         if (ACTION_VIBRATION.equals(intent.getAction())) {
-            if (ringtone != null && intent.getIntExtra("alarm_id", -1) == alarmId) {
+            int requestedId=intent.getIntExtra("alarm_id", -1);
+            boolean belongs=activeAlarmIds.contains(requestedId);
+            int[] requestedIds=intent.getIntArrayExtra(EXTRA_ACTIVE_ALARM_IDS);
+            if(requestedIds!=null)for(int id:requestedIds)if(activeAlarmIds.contains(id))belongs=true;
+            if (ringtone != null && belongs) {
                 vibrateEnabled = intent.getBooleanExtra("vibrate", true); applyVibration();
             } else if (ringtone == null) stopSelf();
             return START_NOT_STICKY;
         }
         if (ACTION_STOP.equals(intent.getAction())) { stopAlarm(); return START_NOT_STICKY; }
-        if (ACTION_SNOOZE.equals(intent.getAction())) { snooze(); return START_NOT_STICKY; }
+        if (ACTION_SNOOZE.equals(intent.getAction())) { restoreActiveIds(intent); snooze(); return START_NOT_STICKY; }
         int incomingId = intent.getIntExtra("alarm_id", -1);
         if (ringtone != null) {
             activeAlarmIds.add(incomingId);
@@ -67,14 +72,15 @@ public class AlarmService extends Service {
     }
 
     private Notification buildNotification(String label) {
-        Intent full = new Intent(this, AlarmActivity.class).putExtra("alarm_id", alarmId).putExtra("label", label);
+        int[] ids=activeAlarmIds.stream().mapToInt(Integer::intValue).toArray();
+        Intent full = new Intent(this, AlarmActivity.class).putExtra("alarm_id", alarmId).putExtra("label", label).putExtra(EXTRA_ACTIVE_ALARM_IDS,ids);
         PendingIntent fullPi = PendingIntent.getActivity(this, 30000 + alarmId, full,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         PendingIntent stopPi = PendingIntent.getService(this, 40000 + alarmId,
                 new Intent(this, AlarmService.class).setAction(ACTION_STOP).putExtra("alarm_id", alarmId),
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         PendingIntent snoozePi = PendingIntent.getService(this, 50000 + alarmId,
-                new Intent(this, AlarmService.class).setAction(ACTION_SNOOZE).putExtra("alarm_id", alarmId),
+                new Intent(this, AlarmService.class).setAction(ACTION_SNOOZE).putExtra("alarm_id", alarmId).putExtra(EXTRA_ACTIVE_ALARM_IDS,ids),
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification.Builder builder = new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(com.example.simplealarm.R.drawable.ic_alarm)
@@ -152,6 +158,11 @@ public class AlarmService extends Service {
         currentVibration = false;
         activeAlarmIds.clear();
         stopForeground(STOP_FOREGROUND_REMOVE); stopSelf();
+    }
+
+    private void restoreActiveIds(Intent intent) {
+        int[] ids=intent.getIntArrayExtra(EXTRA_ACTIVE_ALARM_IDS);
+        if(ids!=null && ids.length>0){activeAlarmIds.clear();for(int id:ids)activeAlarmIds.add(id);}
     }
 
     private boolean canSnoozeAny() {
