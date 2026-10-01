@@ -1,4 +1,24 @@
+import java.util.Properties
+
 plugins { id 'com.android.application' }
+
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withInputStream { localProperties.load(it) }
+}
+
+def signingProperties = new Properties()
+def signingPropertiesPath = localProperties.getProperty('simplealarm.signing.properties')
+def signingPropertiesFile = signingPropertiesPath ? file(signingPropertiesPath) : null
+if (signingPropertiesFile?.exists()) {
+    signingPropertiesFile.withInputStream { signingProperties.load(it) }
+}
+
+def hasReleaseSigning = signingPropertiesFile?.exists() &&
+        ['storeFile', 'storePassword', 'keyAlias', 'keyPassword'].every {
+            signingProperties.getProperty(it)?.trim()
+        }
 
 android {
     namespace 'com.example.simplealarm'
@@ -8,14 +28,40 @@ android {
         applicationId 'com.example.simplealarm'
         minSdk 26
         targetSdk 35
-        versionCode 9
-        versionName '1.8'
+        versionCode 10
+        versionName '1.9'
+    }
+
+    if (hasReleaseSigning) {
+        signingConfigs {
+            release {
+                storeFile file(signingProperties.getProperty('storeFile'))
+                storePassword signingProperties.getProperty('storePassword')
+                keyAlias signingProperties.getProperty('keyAlias')
+                keyPassword signingProperties.getProperty('keyPassword')
+            }
+        }
     }
 
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
         }
     }
+
+    testOptions {
+        unitTests.includeAndroidResources = true
+        unitTests.all {
+            systemProperty 'robolectric.dependency.repo.url', 'https://repo.maven.apache.org/maven2'
+        }
+    }
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.17'
 }

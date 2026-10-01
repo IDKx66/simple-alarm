@@ -3,6 +3,7 @@ package com.example.simplealarm;
 import android.app.*;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.drawable.Icon;
 import android.media.AudioAttributes;
 import android.media.Ringtone;
 import android.media.RingtoneManager;
@@ -11,8 +12,10 @@ import android.os.Build;
 import android.os.IBinder;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
+import android.util.Log;
 import android.widget.Toast;
 import java.util.LinkedHashSet;
 import java.util.Set;
@@ -25,10 +28,33 @@ public class AlarmService extends Service {
     public static final String EXTRA_ACTIVE_ALARM_IDS = "active_alarm_ids";
     private static boolean currentVibration;
     public static boolean isVibrationEnabled() { return currentVibration; }
+    // Service and Activity lifecycle callbacks run on the main thread. Keep this
+    // observer in-process so ringing controls never rely on broadcast payloads.
+    interface RingingStateListener { void onRingingStateChanged(RingingState state); }
+    static final class RingingState {
+        final int alarmId;
+        final String label;
+        final boolean vibrate;
+        private final int[] ids;
+        RingingState(int alarmId, String label, boolean vibrate, int[] ids) {
+            this.alarmId = alarmId;
+            this.label = label;
+            this.vibrate = vibrate;
+            this.ids = ids.clone();
+        }
+        int[] activeIds() { return ids.clone(); }
+    }
+    private static RingingState currentState;
+    private static final Set<RingingStateListener> stateListeners = new LinkedHashSet<>();
+    static RingingState ringingState() { return currentState; }
+    static void addRingingStateListener(RingingStateListener listener) { stateListeners.add(listener); }
+    static void removeRingingStateListener(RingingStateListener listener) { stateListeners.remove(listener); }
     private Ringtone ringtone;
     private Vibrator vibrator;
     private int alarmId = -1;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable autoStop = this::stopAlarm;
+    private long autoStopAt;
     private int snoozeMinutes = 5, maxSnoozes = 3, snoozeCount = 0;
     private String label = "闹钟";
     private boolean vibrateEnabled = true;
@@ -39,21 +65,34 @@ public class AlarmService extends Service {
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent == null) return START_NOT_STICKY;
         if (ACTION_VIBRATION.equals(intent.getAction())) {
-            int requestedId=intent.getIntExtra("alarm_id", -1);
-            boolean belongs=activeAlarmIds.contains(requestedId);
-            int[] requestedIds=intent.getIntArrayExtra(EXTRA_ACTIVE_ALARM_IDS);
-            if(requestedIds!=null)for(int id:requestedIds)if(activeAlarmIds.contains(id))belongs=true;
-            if (ringtone != null && belongs) {
+            if (matchesActiveAlarm(intent)) {
                 vibrateEnabled = intent.getBooleanExtra("vibrate", true); applyVibration();
-            } else if (ringtone == null) stopSelf();
+                publishRingingState();
+            } else if (activeAlarmIds.isEmpty()) stopSelf();
             return START_NOT_STICKY;
         }
-        if (ACTION_STOP.equals(intent.getAction())) { stopAlarm(); return START_NOT_STICKY; }
-        if (ACTION_SNOOZE.equals(intent.getAction())) { restoreActiveIds(intent); snooze(); return START_NOT_STICKY; }
+        if (ACTION_STOP.equals(intent.getAction())) {
+            if (matchesActiveAlarm(intent)) stopAlarm();
+            else if (activeAlarmIds.isEmpty()) stopSelf();
+            return START_NOT_STICKY;
+        }
+        if (ACTION_SNOOZE.equals(intent.getAction())) {
+            if (matchesActiveAlarm(intent)) {
+                Log.i(AlarmScheduler.TIMING_TAG,"snooze requested ids="+activeAlarmIds+" at="+System.currentTimeMillis());
+                snooze();
+            } else if (activeAlarmIds.isEmpty()) stopSelf();
+            return START_NOT_STICKY;
+        }
         int incomingId = intent.getIntExtra("alarm_id", -1);
-        if (ringtone != null) {
-            activeAlarmIds.add(incomingId);
-            ((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).notify(77, buildNotification("多个闹钟（"+activeAlarmIds.size()+"个）"));
+        if (incomingId == -1) {
+            if (activeAlarmIds.isEmpty()) stopSelf();
+            return START_NOT_STICKY;
+        }
+        // A ringtone can be unavailable while vibration and the foreground
+        // notification are still active; the live IDs define the session.
+        if (!activeAlarmIds.isEmpty()) {
+            if (activeAlarmIds.add(incomingId)) extendRingingDuration(intent);
+            updateNotificationAndState();
             return START_NOT_STICKY;
         }
         alarmId = incomingId;
@@ -63,12 +102,25 @@ public class AlarmService extends Service {
         maxSnoozes = intent.getIntExtra("max_snoozes", 3);
         snoozeCount = intent.getIntExtra("snooze_count", 0);
         vibrateEnabled = intent.getBooleanExtra("vibrate", true);
+        long dueAt=intent.getLongExtra(AlarmScheduler.EXTRA_DUE_AT,0L);
+        long receivedAt=intent.getLongExtra(AlarmScheduler.EXTRA_RECEIVED_AT,0L);
+        if(dueAt>0L)Log.i(AlarmScheduler.TIMING_TAG,"service start id="+alarmId+" due="+dueAt+" received="+receivedAt+" serviceAt="+System.currentTimeMillis());
         startForeground(77, buildNotification(label));
         handler.removeCallbacksAndMessages(null);
-        startSoundAndVibration(intent.getStringExtra("ringtone_uri"), intent.getBooleanExtra("gradual", true));
-        int duration = Math.max(1, intent.getIntExtra("duration", 10));
-        handler.postDelayed(this::stopAlarm, duration * 60_000L);
+        startSoundAndVibration(intent.getStringExtra("ringtone_uri"), intent.getBooleanExtra("gradual", true),dueAt,receivedAt);
+        publishRingingState();
+        extendRingingDuration(intent);
         return START_NOT_STICKY;
+    }
+
+    private void extendRingingDuration(Intent intent) {
+        long duration = Math.max(1, intent.getIntExtra("duration", 10)) * 60_000L;
+        // The group keeps one sound until its latest member's deadline. A later
+        // alarm must not be cut short by the first one's timer, and shorter or
+        // duplicate members must not shorten or repeatedly extend the session.
+        autoStopAt = Math.max(autoStopAt, SystemClock.uptimeMillis() + duration);
+        handler.removeCallbacks(autoStop);
+        handler.postAtTime(autoStop, autoStopAt);
     }
 
     private Notification buildNotification(String label) {
@@ -84,15 +136,16 @@ public class AlarmService extends Service {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification.Builder builder = new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(com.example.simplealarm.R.drawable.ic_alarm)
-                .setContentTitle(label).setContentText("闹钟正在响铃")
+                .setContentTitle(label).setContentText("闹钟正在响铃 · 展开通知可操作")
                 .setCategory(Notification.CATEGORY_ALARM).setPriority(Notification.PRIORITY_MAX)
                 .setOngoing(true).setFullScreenIntent(fullPi, true).setContentIntent(fullPi);
-        if (canSnoozeAny()) builder.addAction(new Notification.Action.Builder(null, "稍后提醒", snoozePi).build());
-        builder.addAction(new Notification.Action.Builder(null, "停止", stopPi).build());
+        Icon actionIcon=Icon.createWithResource(this,R.drawable.ic_alarm);
+        if (canSnoozeAny()) builder.addAction(new Notification.Action.Builder(actionIcon, "稍后提醒", snoozePi).build());
+        builder.addAction(new Notification.Action.Builder(actionIcon, "停止", stopPi).build());
         return builder.build();
     }
 
-    private void startSoundAndVibration(String customUri, boolean gradual) {
+    private void startSoundAndVibration(String customUri, boolean gradual,long dueAt,long receivedAt) {
         if (ringtone == null) {
             Uri uri = null;
             if (customUri != null && !customUri.isEmpty()) try { uri = Uri.parse(customUri); } catch (Exception ignored) { }
@@ -112,12 +165,18 @@ public class AlarmService extends Service {
                     handler.postDelayed(() -> { if (ringtone != null) ringtone.setVolume(Math.min(1f, volume)); }, i * 3000L);
                 }
             }
-            try { ringtone.play(); } catch (Exception error) {
+            try { ringtone.play(); logPlayback(dueAt,receivedAt); } catch (Exception error) {
                 ringtone = safeRingtone(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM));
-                if (ringtone != null) ringtone.play();
+                if (ringtone != null) { ringtone.play(); logPlayback(dueAt,receivedAt); }
             }
         }
         applyVibration();
+    }
+
+    private void logPlayback(long dueAt,long receivedAt) {
+        if(dueAt<=0L)return;
+        long now=System.currentTimeMillis();
+        Log.i(AlarmScheduler.TIMING_TAG,"ringtone play id="+alarmId+" due="+dueAt+" received="+receivedAt+" playAt="+now+" lateMs="+(now-dueAt)+" appMs="+(now-receivedAt));
     }
 
     private void applyVibration() {
@@ -132,37 +191,82 @@ public class AlarmService extends Service {
     }
 
     private void snooze() {
-        AlarmManager am = (AlarmManager) getSystemService(ALARM_SERVICE);
-        if (Build.VERSION.SDK_INT >= 31 && !am.canScheduleExactAlarms()) {
-            Toast.makeText(this,"无法设置稍后提醒：请允许精确闹钟权限",Toast.LENGTH_LONG).show(); return;
-        }
         java.util.List<Alarm> stored = AlarmStore.load(this); boolean scheduled = false;
+        Set<Integer> failedIds = new LinkedHashSet<>();
+        boolean eligible = false;
+        long requestedAt = System.currentTimeMillis();
         for (int id : activeAlarmIds) {
             for (Alarm alarm : stored) if (alarm.id == id && alarm.snoozeCount < alarm.maxSnoozes) {
-                alarm.snoozeCount++;
-                long when=System.currentTimeMillis()+Math.max(1,alarm.snoozeMinutes)*60_000L;
-                Intent i=new Intent(this,AlarmReceiver.class).putExtra("alarm_id",alarm.id).putExtra("snooze",true);
-                PendingIntent pi=PendingIntent.getBroadcast(this,900000+alarm.id,i,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
-                PendingIntent showPi=PendingIntent.getActivity(this,990000+alarm.id,new Intent(this,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
-                am.setAlarmClock(new AlarmManager.AlarmClockInfo(when,showPi),pi); scheduled=true;
+                eligible = true;
+                long when=requestedAt+Math.max(1,alarm.snoozeMinutes)*60_000L;
+                boolean success = false;
+                try {
+                    if(AlarmScheduler.scheduleSnooze(this,alarm,when)) {
+                        alarm.snoozeCount++;
+                        alarm.pendingSnoozeAt=when;
+                        scheduled=true;
+                        success=true;
+                    }
+                } catch(Exception error) { Log.e(AlarmScheduler.TIMING_TAG,"snooze scheduling failed id="+id,error); }
+                if (!success) failedIds.add(id);
             }
         }
-        if (scheduled) { AlarmStore.save(this,stored); stopAlarm(); }
-        else Toast.makeText(this,"已达到稍后提醒次数上限",Toast.LENGTH_LONG).show();
+        if (scheduled) AlarmStore.save(this,stored);
+        if (!eligible) {
+            Toast.makeText(this,"已达到稍后提醒次数上限",Toast.LENGTH_LONG).show();
+        } else if (failedIds.isEmpty()) {
+            stopAlarm();
+        } else {
+            // Keep failed items ringing; successfully scheduled items must not
+            // remain active and accidentally receive another snooze request.
+            activeAlarmIds.clear();
+            activeAlarmIds.addAll(failedIds);
+            alarmId = activeAlarmIds.iterator().next();
+            for (Alarm alarm : stored) if (alarm.id == alarmId) {
+                label = alarm.label;
+                snoozeCount = alarm.snoozeCount;
+                maxSnoozes = alarm.maxSnoozes;
+                break;
+            }
+            updateNotificationAndState();
+            Toast.makeText(this,scheduled ? "部分闹钟未能设置稍后提醒，仍在响铃，请检查闹钟权限"
+                    : "稍后提醒未能设置，闹钟仍在响铃，请检查闹钟权限",Toast.LENGTH_LONG).show();
+        }
     }
 
     private void stopAlarm() {
         handler.removeCallbacksAndMessages(null);
+        autoStopAt = 0L;
         if (ringtone != null) { ringtone.stop(); ringtone = null; }
         if (vibrator != null) vibrator.cancel();
         currentVibration = false;
         activeAlarmIds.clear();
+        publishRingingState();
         stopForeground(STOP_FOREGROUND_REMOVE); stopSelf();
     }
 
-    private void restoreActiveIds(Intent intent) {
+    private boolean matchesActiveAlarm(Intent intent) {
+        if (activeAlarmIds.contains(intent.getIntExtra("alarm_id", -1))) return true;
         int[] ids=intent.getIntArrayExtra(EXTRA_ACTIVE_ALARM_IDS);
-        if(ids!=null && ids.length>0){activeAlarmIds.clear();for(int id:ids)activeAlarmIds.add(id);}
+        if (ids != null) for (int id : ids) if (activeAlarmIds.contains(id)) return true;
+        return false;
+    }
+
+    private String ringingLabel() {
+        return activeAlarmIds.size() > 1 ? "多个闹钟（"+activeAlarmIds.size()+"个）" : label;
+    }
+
+    private void updateNotificationAndState() {
+        ((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).notify(77, buildNotification(ringingLabel()));
+        publishRingingState();
+    }
+
+    private void publishRingingState() {
+        currentState = activeAlarmIds.isEmpty() ? null : new RingingState(alarmId,
+                ringingLabel(), vibrateEnabled, activeAlarmIds.stream().mapToInt(Integer::intValue).toArray());
+        for (RingingStateListener listener : new LinkedHashSet<>(stateListeners)) {
+            listener.onRingingStateChanged(currentState);
+        }
     }
 
     private boolean canSnoozeAny() {

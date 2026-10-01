@@ -1,7 +1,7 @@
 {
-  "versionCode": 9,
-  "versionName": "1.8",
-  "apkUrl": "https://simple-alarm-updates.idkx66.chatgpt.site/SimpleAlarm-1.8.apk",
-  "sha256": "2561ef0757ae8681cccf0da7c316a70430a596a931415897728e2884813d16cd",
-  "notes": "重复日期快捷选择；首页权限检查与备份恢复入口；多个闹钟同时响铃状态和稍后提醒上限提示。"
+  "versionCode": 10,
+  "versionName": "1.9",
+  "apkUrl": "https://simple-alarm-updates.idkx66.chatgpt.site/SimpleAlarm-1.9.apk",
+  "sha256": "b1032e923fae47029a493644f2a84cd43e8c6b1d8e59fd906c2fe039921d8a2f",
+  "notes": "修复重启后稍后提醒恢复、旧提醒误触发和多闹钟合并状态；改进通知权限检查。"
 }

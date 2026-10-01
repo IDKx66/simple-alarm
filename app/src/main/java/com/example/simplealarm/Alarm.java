@@ -17,6 +17,7 @@ public class Alarm {
     public int snoozeMinutes;
     public int maxSnoozes;
     public int snoozeCount;
+    public long pendingSnoozeAt;
     public long skippedOccurrence;
 
     public Alarm(int id, int hour, int minute, String label, boolean enabled, int daysMask) {
@@ -33,7 +34,8 @@ public class Alarm {
         o.put("ringtoneUri", ringtoneUri); o.put("vibrate", vibrate);
         o.put("gradualVolume", gradualVolume); o.put("ringDurationMinutes", ringDurationMinutes);
         o.put("snoozeMinutes", snoozeMinutes); o.put("maxSnoozes", maxSnoozes);
-        o.put("snoozeCount", snoozeCount); o.put("skippedOccurrence", skippedOccurrence);
+        o.put("snoozeCount", snoozeCount); o.put("pendingSnoozeAt", pendingSnoozeAt);
+        o.put("skippedOccurrence", skippedOccurrence);
         return o;
     }
 
@@ -48,6 +50,7 @@ public class Alarm {
         a.snoozeMinutes = Math.max(1, o.optInt("snoozeMinutes", 5));
         a.maxSnoozes = Math.max(0, o.optInt("maxSnoozes", 3));
         a.snoozeCount = Math.max(0, o.optInt("snoozeCount", 0));
+        a.pendingSnoozeAt = Math.max(0L, o.optLong("pendingSnoozeAt", 0L));
         a.skippedOccurrence = o.optLong("skippedOccurrence", 0L);
         return a;
     }
