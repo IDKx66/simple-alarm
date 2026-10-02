@@ -1,7 +1,0 @@
-{
-  "versionCode": 11,
-  "versionName": "2.0",
-  "apkUrl": "https://github.com/IDKx66/simple-alarm/releases/download/v2.0/SimpleAlarm-v2.0.apk",
-  "sha256": "4ac3200f42846d1d5f95b5f7d2d8e8f9589c906837179bbcf384957da658ff58",
-  "notes": "全新简洁时钟界面，权限检查移入设置；移除备份与恢复。修复旧闹钟误响、短铃声循环、通知关闭后的前台操作入口和更新下载状态。"
-}
