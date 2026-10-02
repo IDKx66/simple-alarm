@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.graphics.drawable.Icon;
 import android.media.AudioAttributes;
+import android.media.MediaPlayer;
 import android.media.Ringtone;
 import android.media.RingtoneManager;
 import android.net.Uri;
@@ -12,6 +13,7 @@ import android.os.Build;
 import android.os.IBinder;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.os.SystemClock;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
@@ -50,6 +52,7 @@ public class AlarmService extends Service {
     static void addRingingStateListener(RingingStateListener listener) { stateListeners.add(listener); }
     static void removeRingingStateListener(RingingStateListener listener) { stateListeners.remove(listener); }
     private Ringtone ringtone;
+    private MediaPlayer legacyPlayer;
     private Vibrator vibrator;
     private int alarmId = -1;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -146,6 +149,13 @@ public class AlarmService extends Service {
     }
 
     private void startSoundAndVibration(String customUri, boolean gradual,long dueAt,long receivedAt) {
+        if (Build.VERSION.SDK_INT < 28) {
+            // Ringtone's public looping API starts at Android 9. Use a public
+            // MediaPlayer on Android 8 so a short sound lasts for the ring session.
+            startLegacySound(customUri, gradual, dueAt, receivedAt);
+            applyVibration();
+            return;
+        }
         if (ringtone == null) {
             Uri uri = null;
             if (customUri != null && !customUri.isEmpty()) try { uri = Uri.parse(customUri); } catch (Exception ignored) { }
@@ -156,21 +166,80 @@ public class AlarmService extends Service {
                 ringtone = safeRingtone(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM));
             if (ringtone == null) ringtone = safeRingtone(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION));
             if (ringtone == null) { Toast.makeText(this,"无法播放铃声，请检查系统声音设置",Toast.LENGTH_LONG).show(); applyVibration(); return; }
-            if (Build.VERSION.SDK_INT >= 28) ringtone.setLooping(true);
-            ringtone.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build());
-            if (Build.VERSION.SDK_INT >= 28 && gradual) {
-                ringtone.setVolume(0.12f);
+            if (!playRingtone(ringtone, gradual, dueAt, receivedAt)) {
+                ringtone = safeRingtone(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM));
+                if (ringtone != null && !playRingtone(ringtone, gradual, dueAt, receivedAt)) {
+                    ringtone = null;
+                }
+            }
+            if (ringtone == null) {
+                Toast.makeText(this,"无法播放铃声，请检查系统声音设置",Toast.LENGTH_LONG).show();
+            } else if (gradual) {
                 for (int i = 1; i <= 10; i++) {
                     final float volume = 0.12f + i * 0.088f;
                     handler.postDelayed(() -> { if (ringtone != null) ringtone.setVolume(Math.min(1f, volume)); }, i * 3000L);
                 }
             }
-            try { ringtone.play(); logPlayback(dueAt,receivedAt); } catch (Exception error) {
-                ringtone = safeRingtone(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM));
-                if (ringtone != null) { ringtone.play(); logPlayback(dueAt,receivedAt); }
-            }
         }
         applyVibration();
+    }
+
+    private boolean playRingtone(Ringtone candidate, boolean gradual, long dueAt, long receivedAt) {
+        if (Build.VERSION.SDK_INT < 28) return false;
+        try {
+            // A replacement Ringtone has fresh defaults; configure fallback
+            // playback just like the selected sound before attempting to play.
+            candidate.setLooping(true);
+            candidate.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build());
+            if (gradual) candidate.setVolume(0.12f);
+            candidate.play();
+            logPlayback(dueAt, receivedAt);
+            return true;
+        } catch (Exception error) {
+            try { candidate.stop(); } catch (Exception ignored) { }
+            Log.w(AlarmScheduler.TIMING_TAG, "ringtone playback unavailable", error);
+            return false;
+        }
+    }
+
+    private void startLegacySound(String customUri, boolean gradual, long dueAt, long receivedAt) {
+        if (legacyPlayer != null) return;
+        Set<Uri> candidates = new LinkedHashSet<>();
+        if (customUri != null && !customUri.isEmpty()) {
+            try { candidates.add(Uri.parse(customUri)); } catch (RuntimeException ignored) { }
+        }
+        candidates.add(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM));
+        candidates.add(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION));
+        for (Uri uri : candidates) {
+            if (uri == null) continue;
+            MediaPlayer candidate = new MediaPlayer();
+            try {
+                candidate.setAudioAttributes(new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build());
+                candidate.setWakeMode(this, PowerManager.PARTIAL_WAKE_LOCK);
+                candidate.setDataSource(this, uri);
+                candidate.setLooping(true);
+                if (gradual) candidate.setVolume(0.12f, 0.12f);
+                candidate.prepare();
+                candidate.start();
+                legacyPlayer = candidate;
+                logPlayback(dueAt, receivedAt);
+                if (gradual) {
+                    for (int i = 1; i <= 10; i++) {
+                        final float volume = Math.min(1f, 0.12f + i * 0.088f);
+                        handler.postDelayed(() -> {
+                            if (legacyPlayer != null) legacyPlayer.setVolume(volume, volume);
+                        }, i * 3000L);
+                    }
+                }
+                return;
+            } catch (Exception error) {
+                candidate.release();
+                Log.w(AlarmScheduler.TIMING_TAG, "sound unavailable; trying default fallback", error);
+            }
+        }
+        Toast.makeText(this,"无法播放铃声，请检查系统声音设置",Toast.LENGTH_LONG).show();
     }
 
     private void logPlayback(long dueAt,long receivedAt) {
@@ -238,6 +307,7 @@ public class AlarmService extends Service {
         handler.removeCallbacksAndMessages(null);
         autoStopAt = 0L;
         if (ringtone != null) { ringtone.stop(); ringtone = null; }
+        if (legacyPlayer != null) { legacyPlayer.release(); legacyPlayer = null; }
         if (vibrator != null) vibrator.cancel();
         currentVibration = false;
         activeAlarmIds.clear();

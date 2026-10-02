@@ -16,6 +16,11 @@ public class AlarmReceiver extends BroadcastReceiver {
         long dueAt=intent.getLongExtra(AlarmScheduler.EXTRA_DUE_AT,0L);
         if (alarm == null || (!alarm.enabled && !snooze)) return;
         if (snooze && (dueAt<=0L || alarm.pendingSnoozeAt!=dueAt)) return;
+        // Cancellation cannot retract a broadcast already queued by Android.
+        // Validate against its original due time, so edits, skips and timezone
+        // changes reject old occurrences without rejecting a delayed valid ring.
+        if (!snooze && dueAt > 0L
+                && AlarmScheduler.nextTrigger(alarm, dueAt - 1L) != dueAt) return;
         if(dueAt>0L) Log.i(AlarmScheduler.TIMING_TAG,"received "+(snooze?"snooze":"regular")+" id="+id+" due="+dueAt+" received="+receivedAt+" lateMs="+(receivedAt-dueAt));
         PowerManager power = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
         PowerManager.WakeLock wakeLock = power.newWakeLock(

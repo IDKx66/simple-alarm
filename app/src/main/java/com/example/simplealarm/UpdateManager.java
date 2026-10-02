@@ -63,10 +63,9 @@ public final class UpdateManager {
             Toast.makeText(activity,"请先允许安装此来源，再点击检查更新",Toast.LENGTH_LONG).show();return;
         }
         DownloadManager dm=(DownloadManager)activity.getSystemService(Context.DOWNLOAD_SERVICE);
-        DownloadManager.Request request=new DownloadManager.Request(Uri.parse(url)).setTitle("简洁闹钟 "+version).setDescription("正在下载更新").setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED).setMimeType("application/vnd.android.package-archive").setDestinationInExternalFilesDir(activity,"updates","SimpleAlarm-"+version+".apk");
+        DownloadManager.Request request=new DownloadManager.Request(Uri.parse(url)).setTitle("简洁闹钟 "+version).setDescription("正在下载更新").setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED).setMimeType("application/vnd.android.package-archive").setDestinationInExternalFilesDir(activity,"updates","SimpleAlarm-"+java.util.UUID.randomUUID()+".apk");
         long id=dm.enqueue(request);
-        activity.getSharedPreferences(PREFS,0).edit().putLong("pending_download_id",id)
-                .putString("pending_sha256",sha256.toLowerCase()).apply();
+        UpdateDownloadReceiver.setPendingDownload(activity,id,sha256);
         Toast.makeText(activity,"已开始下载，完成后会打开安装界面",Toast.LENGTH_LONG).show();
     }
 }

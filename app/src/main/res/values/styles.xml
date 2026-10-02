@@ -1,10 +1,15 @@
 <resources>
     <style name="Theme.SimpleAlarm" parent="android:style/Theme.Material.NoActionBar">
-        <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#FF676C</item>
-        <item name="android:navigationBarColor">#000000</item>
-        <item name="android:statusBarColor">#000000</item>
-        <item name="android:windowBackground">#000000</item>
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:colorAccent">#8AB4F8</item>
+        <item name="android:colorControlNormal">#9AA2AF</item>
+        <item name="android:colorControlActivated">#8AB4F8</item>
+        <item name="android:colorButtonNormal">#272C34</item>
+        <item name="android:textColorPrimary">#F3F4F6</item>
+        <item name="android:textColorSecondary">#9AA2AF</item>
+        <item name="android:navigationBarColor">#101114</item>
+        <item name="android:statusBarColor">#101114</item>
+        <item name="android:windowBackground">#101114</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

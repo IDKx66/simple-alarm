@@ -85,7 +85,7 @@ public class AlarmRecoveryTest {
         assertEquals(1, alarms.getScheduledAlarms().size());
     }
 
-    @Test public void migratesAlarmBackupAndNextIdToDeviceStorage() throws Exception {
+    @Test public void migratesCurrentAlarmsAndNextIdWhileDiscardingOldBackup() throws Exception {
         Alarm alarm = new Alarm(1000, 7, 0, "旧数据", true, 127);
         String json = "[" + alarm.toJson() + "]";
         context.getSharedPreferences("alarms", 0).edit()
@@ -96,10 +96,8 @@ public class AlarmRecoveryTest {
         SharedPreferences device = context.createDeviceProtectedStorageContext()
                 .getSharedPreferences("alarms", 0);
         assertEquals(json, device.getString("items", null));
-        assertEquals(json, device.getString("items_backup", null));
+        assertFalse(device.contains("items_backup"));
         assertEquals(4321, AlarmStore.nextId(context));
-        device.edit().putString("items", "broken").commit();
-        assertEquals("旧数据", AlarmStore.load(context).get(0).label);
     }
 
     @Test public void lockedBootReadsDeviceStorageAndRestoresSnooze() {

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.example.simplealarm"
-    android:versionCode="10"
-    android:versionName="1.9">
+    android:versionCode="11"
+    android:versionName="2.0">
     <!-- Required because this project can also be packaged directly with aapt,
          outside Gradle. Keep these values aligned with app/build.gradle. -->
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
@@ -21,7 +21,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@drawable/ic_alarm"
         android:label="简洁闹钟"
         android:supportsRtl="true"
