@@ -23,7 +23,7 @@
 
 ## 安装与使用
 
-1. 从[官方下载页](https://simple-alarm-updates.idkx66.chatgpt.site)下载 v2.0，或在安卓手机上打开 `releases/SimpleAlarm-v2.0.apk`，并允许安装此来源的应用。
+1. 从[GitHub 发布页](https://github.com/IDKx66/simple-alarm/releases/tag/v2.0)或[官方下载页](https://simple-alarm-updates.idkx66.chatgpt.site)下载 v2.0，也可在安卓手机上打开 `releases/SimpleAlarm-v2.0.apk`，并允许安装此来源的应用。
 2. 在右上角“设置 → 权限检查”中允许通知、精确闹钟和锁屏全屏提醒；缺少关键权限时首页会显示简短提示。
 3. vivo 手机建议在系统设置中允许该应用自启动，并将电池用量设为“不限制”。
 4. 添加一个两分钟后的测试闹钟，锁屏验证响铃是否正常。
@@ -39,6 +39,18 @@
 ```
 
 把清单和新版 APK 放到可公开下载的 HTTPS 地址即可。应用不能绕过安卓系统确认静默安装，这是系统安全限制。
+
+### 官网被拦截或检查更新返回 HTTP 403
+
+已发布的 1.9 和 2.0 默认使用 `chatgpt.site` 更新源；部分网络可能被该域名的安全防护拦截。此时可以使用独立的 GitHub 更新源，无需重装应用：
+
+```text
+https://raw.githubusercontent.com/IDKx66/simple-alarm/main/update.json
+```
+
+在“检查更新失败”弹窗中点击“重新设置地址”，粘贴上述完整地址，再点击“保存并检查”。1.9 会显示 2.0 并从 GitHub 下载；已安装 2.0 时会提示已是最新版本。地址会保存在本机，覆盖安装后继续使用。
+
+GitHub 更新源使用根目录的 `update.json`，安装包来自公开的 GitHub Release，保留 SHA-256 校验。后续发布时需同步更新此文件的版本、下载地址及校验值；官网清单继续独立维护。两个入口的可用性仍取决于手机所在网络。
 
 最低支持 Android 8.0（API 26），目标版本 Android 15（API 35）。
 
